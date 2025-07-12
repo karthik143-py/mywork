@@ -2,15 +2,14 @@
 from fastapi import FastAPI, UploadFile, File
 
 from fastapi.responses import FileResponse
+import torch
 from pydantic import BaseModel
 from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import spacy
 from keybert import KeyBERT
-# import networkx as nx
 import google.generativeai as genai
-# import matplotlib.pyplot as plt
-# import io
-# import base64
+
 
 from dotenv import load_dotenv
 import os
@@ -21,7 +20,7 @@ from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pyvis.network import Network
 # import asyncio
-import uvicorn
+# import uvicorn
 import os
 from sentence_transformers import SentenceTransformer, util
 load_dotenv()
@@ -31,8 +30,12 @@ app = FastAPI()
 api_key = os.getenv("GOOGLE_API_KEY")
 llm = ChatGoogleGenerativeAI(model="models/gemini-1.5-flash", google_api_key=api_key)
 graph_transformer = LLMGraphTransformer(llm=llm)
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-qa_model = pipeline('question-answering')
+model_name = "t5-small"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+# qa_model = pipeline('question-answering')
 nlp = spacy.load("en_core_web_trf")
 kw_model = KeyBERT(model='all-mpnet-base-v2')
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
@@ -48,11 +51,16 @@ class QAInput(BaseModel):
 
 @app.post("/summarize/")
 async def summarize(data: TextInput):
-    word_count = len(data.text.split())
-    min_length = min(max(int(word_count * 0.3), 30), 150)    # never too big
-    max_length = min(max(int(word_count * 0.5), 60), 250)  
-    result = summarizer(data.text, min_length=min_length,max_length=max_length, do_sample=False)
-    return {"summary": result[0]['summary_text']}
+    input_text = "summarize: " + data.text.strip().replace("\n", " ")
+    
+    # Tokenize
+    inputs = tokenizer.encode(input_text, return_tensors="pt", max_length=512, truncation=True).to(device)
+
+    # Generate summary
+    summary_ids = model.generate(inputs, max_length=150, min_length=30, length_penalty=2.0, num_beams=4, early_stopping=True)
+    summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+
+    return {"summary": summary}
 
 @app.post("/question/")
 async def question(data: QAInput):
@@ -128,8 +136,7 @@ async def graph(data: TextInput):
     output_file = "knowledge_graph.html"
     visualize_graph(graph_documents, output_file)
     return FileResponse(output_file, media_type='text/html', filename="knowledge_graph.html")
-if __name__ == "__main__":
-    uvicorn.run("main", host="127.0.0.1", port=8000, reload=True)
+
 
 
 
