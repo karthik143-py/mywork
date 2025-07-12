@@ -2,44 +2,48 @@ import streamlit as st
 import fitz  # PyMuPDF
 import requests
 
-st.title("🔑 Keyword Extraction (PDF or Text)")
+st.title("🔑 Keyword Extraction from PDF")
 
-# File uploader for PDF
-uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
+# === Helper: Split long text into chunks ===
+def chunk_text(text, max_words=400):
+    words = text.split()
+    for i in range(0, len(words), max_words):
+        yield " ".join(words[i:i + max_words])
 
-extracted_text = ""
+uploaded_file = st.file_uploader("📄 Upload a PDF file", type="pdf")
 
-if uploaded_file is not None:
+if uploaded_file:
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+    extracted_text = ""
     for page in doc:
         extracted_text += page.get_text()
-    
-    # st.subheader("Extracted PDF Text")
-    # st.text_area("PDF Content", extracted_text, height=300)
 
-# Manual text input
-# manual_text = st.text_area("Or paste your text here:")
+    st.success("✅ PDF text extracted successfully.")
 
-# Choose text source
-final_text = extracted_text
+    # === Process chunks ===
+    chunks = list(chunk_text(extracted_text, max_words=400))
+    st.info(f"Text split into {len(chunks)} chunks.")
 
-# Button to extract keywords
-if st.button("Extract Keywords"):
-    with st.spinner("Extracting keywords..."):
-        if final_text.strip() == "":
-            st.warning("❗ Please upload a PDF or enter text.")
+    if st.button("🔍 Extract Keywords"):
+        all_keywords = set()
+        progress = st.progress(0)
+
+        for i, chunk in enumerate(chunks):
+            try:
+                response = requests.post("http://127.0.0.1:8000/keywords/", json={"text": chunk})
+                if response.status_code == 200:
+                    keywords = response.json().get("keywords", [])
+                    all_keywords.update(keywords)
+                else:
+                    st.warning(f"Chunk {i+1}: ❌ Error {response.status_code}")
+            except Exception as e:
+                st.warning(f"Chunk {i+1}: ❌ Request failed - {e}")
+
+            progress.progress((i + 1) / len(chunks))
+
+        st.subheader("🧠 Final Extracted Keywords")
+        if all_keywords:
+            st.write(", ".join(sorted(all_keywords)))
+            st.download_button("📥 Download Keywords", data=", ".join(sorted(all_keywords)), file_name="keywords.txt")
         else:
-            with st.spinner("Extracting keywords..."):
-                try:
-                    response = requests.post("http://127.0.0.1:8000/keywords/", json={"text": final_text})
-                    if response.status_code == 200:
-                        keywords = response.json().get("keywords", [])
-                        if not keywords:
-                            st.info("No keywords found.")
-                        else:
-                            st.success("✅ Extracted Keywords:")
-                            st.write(", ".join(keywords))
-                    else:
-                        st.error(f"Error: {response.status_code}")
-                except Exception as e:
-                    st.error(f"Request failed: {e}")
+            st.info("No keywords found.")
