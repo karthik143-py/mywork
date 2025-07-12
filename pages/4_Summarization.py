@@ -1,41 +1,49 @@
 import streamlit as st
 import fitz  # PyMuPDF
 import requests
+# import torch
 
-st.title("📄 Text Summarization (PDF or Text)")
+st.title("📄 PDF & Text Summarizer")
 
-# File uploader for PDF
-uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
+# === Helper: Split long text into chunks ===
+def chunk_text(text, max_words=500):
+    words = text.split()
+    for i in range(0, len(words), max_words):
+        yield " ".join(words[i:i + max_words])
 
-extracted_text = ""
+# === File Upload ===
+uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 
-if uploaded_file is not None:
+if uploaded_file:
+    # Extract text from PDF
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+    full_text = ""
     for page in doc:
-        extracted_text += page.get_text()
-    
-    st.subheader("Extracted PDF Text")
-    st.text_area("PDF Content", extracted_text, height=300)
+        full_text += page.get_text()
 
-# Text area for manual input
-text_input = st.text_area("Or paste your text here:")
+    # Break into chunks
+    chunks = list(chunk_text(full_text, max_words=450))
+    st.info(f"✅ PDF loaded.")
 
-# Choose which text to summarize: PDF or Manual
-final_text = extracted_text if extracted_text.strip() != "" else text_input
+    # Show progress and summarize
+    summaries = []
+    progress = st.progress(0)
+    for i, chunk in enumerate(chunks):
+        try:
+            res = requests.post("http://127.0.0.1:8000/summarize/", json={"text": chunk})
+            if res.status_code == 200:
+                summary = res.json().get("summary", "")
+                summaries.append(f"{summary}")
+            else:
+                summaries.append(f"❌ API Error {res.status_code}")
+        except Exception as e:
+            summaries.append(f"Request failed - {e}")
+        progress.progress((i + 1) / len(chunks))
 
-if st.button("Summarize"):
-    if final_text.strip() == "":
-        st.warning("❗ Please upload a PDF or enter text.")
-    else:
-        with st.spinner("Generating summary..."):
-            try:
-                response = requests.post("http://127.0.0.1:8000/summarize/", json={"text": final_text})
-                if response.status_code == 200:
-                    summary = response.json().get("summary", "No summary returned.")
-                    st.success("✅ Summary generated successfully!")
-                    st.subheader("Summary")
-                    st.write(summary)
-                else:
-                    st.error(f"Error: {response.status_code}")
-            except Exception as e:
-                st.error(f"Request failed: {e}")
+    # Display combined summary
+    full_summary = "\n\n".join(summaries)
+    st.subheader("🧠 Final Summary")
+    st.text_area("Summary Output", full_summary, height=400)
+
+    # Optional: Download button
+    st.download_button("📥 Download Summary", data=full_summary, file_name="summary.txt")
