@@ -8,7 +8,10 @@ from main import app as fastapi_app  # this is your FastAPI backend
 
 # ✅ Start FastAPI backend in background
 def run_fastapi():
+
+    print("FastAPI backend started by f1")
     print("FastAPI backend started")
+
     uvicorn.run(fastapi_app, host="127.0.0.1", port=8000)
 
 threading.Thread(target=run_fastapi, daemon=True).start()
